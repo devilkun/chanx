@@ -19,14 +19,14 @@ type UnboundedChan[T any] struct {
 // Len returns len of In plus len of Out plus len of buffer.
 // It is not accurate and only for your evaluating approximate number of elements in this chan,
 // see https://github.com/smallnest/chanx/issues/7.
-func (c UnboundedChan[T]) Len() int {
+func (c *UnboundedChan[T]) Len() int {
 	return len(c.In) + c.BufLen() + len(c.Out)
 }
 
 // BufLen returns len of the buffer.
 // It is not accurate and only for your evaluating approximate number of elements in this chan,
 // see https://github.com/smallnest/chanx/issues/7.
-func (c UnboundedChan[T]) BufLen() int {
+func (c *UnboundedChan[T]) BufLen() int {
 	return int(atomic.LoadInt64(&c.bufCount))
 }
 
@@ -51,12 +51,14 @@ func NewUnboundedChanSize[T any](ctx context.Context, initInCapacity, initOutCap
 
 func process[T any](ctx context.Context, in, out chan T, ch *UnboundedChan[T]) {
 	defer close(out)
-	// cctx, cancel := context.WithCancel(ctx)
-	// defer cancel()
 	drain := func() {
 		for !ch.buffer.IsEmpty() {
-			out <- ch.buffer.Pop()
-			atomic.AddInt64(&ch.bufCount, -1)
+			select {
+			case out <- ch.buffer.Pop():
+				atomic.AddInt64(&ch.bufCount, -1)
+			case <-ctx.Done():
+				return
+			}
 		}
 
 		ch.buffer.Reset()
